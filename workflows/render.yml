@@ -1,0 +1,94 @@
+name: Render Motion Video
+
+# Dijalankan secara manual dari tab Actions > Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      composition:
+        description: 'Pilih video yang akan dirender'
+        required: true
+        type: choice
+        default: V001_AI
+        options:
+          - V001_AI
+          - V002_DNA
+          - V003_Heart
+          - V004_Cell
+          - V005_Space
+          - V006_Chemistry
+          - V007_Quantum
+          - V008_Data
+          - V009_Robotics
+          - V010_Abstract
+      mode:
+        description: 'preview = 1280x720 (cepat untuk cek) | final-4k = 3840x2160 (hasil akhir)'
+        required: true
+        type: choice
+        default: preview
+        options:
+          - preview
+          - final-4k
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: Render ${{ inputs.composition }} (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          set -e
+          npm install --no-audit --no-fund || {
+            echo "::error title=Instalasi gagal::npm install gagal. Periksa file package.json dan koneksi jaringan runner, lalu jalankan ulang workflow."
+            exit 1
+          }
+
+      - name: Tentukan resolusi
+        id: res
+        run: |
+          if [ "${{ inputs.mode }}" = "preview" ]; then
+            echo "width=1280" >> "$GITHUB_OUTPUT"
+            echo "height=720" >> "$GITHUB_OUTPUT"
+            echo "codec_quality=--crf=28" >> "$GITHUB_OUTPUT"
+          else
+            echo "width=3840" >> "$GITHUB_OUTPUT"
+            echo "height=2160" >> "$GITHUB_OUTPUT"
+            echo "codec_quality=--crf=18" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Render video ke MP4 (H.264, 30 FPS)
+        run: |
+          set -e
+          mkdir -p out
+          OUTFILE="out/${{ inputs.composition }}_${{ inputs.mode }}.mp4"
+          npx remotion render src/index.jsx "${{ inputs.composition }}" "$OUTFILE" \
+            --codec=h264 \
+            --fps=30 \
+            --width=${{ steps.res.outputs.width }} \
+            --height=${{ steps.res.outputs.height }} \
+            ${{ steps.res.outputs.codec_quality }} \
+            --log=info || {
+              echo "::error title=Render gagal::Render ${{ inputs.composition }} gagal. Coba mode preview terlebih dahulu. Jika error memuat 'browser' atau 'chrome', jalankan ulang workflow; jika error memuat 'composition', pastikan ID komposisi cocok dengan src/Root.jsx."
+              exit 1
+            }
+          ls -lh out/
+
+      - name: Upload hasil MP4 sebagai Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.composition }}-${{ inputs.mode }}
+          path: out/*.mp4
+          retention-days: 14
+          if-no-files-found: error
